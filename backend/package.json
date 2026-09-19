@@ -32,7 +32,6 @@
     "class-validator": "^0.15.1",
     "dotenv": "^18.0.1",
     "mongoose": "^9.10.1",
-    "razorpay": "^2.9.8",
     "reflect-metadata": "^0.2.2",
     "rxjs": "^7.8.1"
   },

@@ -1,12 +1,12 @@
 # Goal Spec
 
 ## Overview
-Build a secure payment gateway demo and use it to learn the full payment-processing flow end to end in a full-stack application (React frontend, NestJS backend, MongoDB storage, integrated with Razorpay's test/sandbox mode).
+Build a secure payment gateway demo and use it to learn the full payment-processing flow end to end in a full-stack application (React frontend, NestJS backend, MongoDB storage, integrated with PayPal's Sandbox environment). PayPal was chosen over India-focused gateways (Razorpay) or Kuwait-local ones (MyFatoorah, Tap) because its Developer Sandbox is genuinely self-serve worldwide — testable from Kuwait without a registered EU/UK/US business entity, unlike Stripe/Mollie/Adyen.
 
 ## Objectives
 - Provide a demo storefront UI listing 5 sports items that can be added to a cart.
 - Let the user review the cart (selected items + total) and proceed to checkout.
-- Integrate with Razorpay's test/sandbox mode to perform a demo transaction (card, UPI, or Net Banking).
+- Integrate with PayPal's Sandbox environment to perform a demo transaction via PayPal Checkout.
 - Handle both successful and failed transaction outcomes correctly.
 - Persist transaction history for every attempted payment.
 
@@ -34,15 +34,15 @@ A sample single-store checkout flow used to learn how a payment gateway integrat
 |---|---|
 | **Cart** | The temporary, client-side collection of items a user has selected before checkout. |
 | **Checkout** | The step where the user confirms the cart contents/total and proceeds to payment. |
-| **Payment Gateway** | The third-party service (Razorpay) that securely handles card/payment details and authorizes or declines a transaction. |
-| **Test/Sandbox Gateway** | Razorpay's non-production ("Test Mode") environment, using test API keys, which simulates real transactions without moving real money. |
-| **Payment Method** | The channel used to pay — in this project: Card, UPI, or Net Banking (all supported by Razorpay's test mode). |
+| **Payment Gateway** | The third-party service (PayPal) that securely handles payment details and authorizes or declines a transaction. |
+| **Test/Sandbox Gateway** | PayPal's Sandbox environment — separate sandbox API credentials and sandbox buyer/business test accounts, which simulate real transactions without moving real money. |
+| **Payment Method** | The channel used to pay — in this project: PayPal (balance or a linked card via PayPal Checkout). KNET/UPI/Net Banking are not supported by PayPal and stay out of scope. |
 | **Transaction** | A single attempt to pay for a cart, tracked from initiation through to a final status. |
 | **Transaction History** | The persisted record of all past transactions and their outcomes, stored in MongoDB. |
 | **Transaction Status** | The outcome of a transaction: `DONE` (payment succeeded), `FAILED` (payment attempted but declined/errored), or `CANCELLED` (user abandoned before completion). |
-| **Authorization** | The payment gateway's approval that funds are available/valid, prior to capture. |
-| **Capture** | The step where an authorized amount is actually collected. A failed transaction must never reach capture. |
+| **Authorization** | The payment gateway's approval that funds are available/valid, prior to capture. PayPal's Orders API models this literally as an order the buyer has *approved* but not yet captured. |
+| **Capture** | The step where an approved amount is actually collected — in PayPal's API, an explicit `POST .../orders/{id}/capture` call the backend makes after the buyer approves. A failed transaction must never reach capture. |
 | **Webhook / Callback** | An asynchronous notification from the payment gateway to the backend confirming the final result of a transaction. |
 | **Idempotency** | The property that retrying the same payment request (e.g. on network retry) does not create a duplicate charge or duplicate transaction record. |
 | **API** | The NestJS backend's HTTP interface, called by the React frontend to manage cart, checkout, and transaction data. |
-| **Razorpay Order** | A Razorpay-side record created by the backend before checkout, representing the amount to be collected; the frontend checkout widget is initialized against this order id. |
+| **PayPal Order** | A PayPal-side record created by the backend (Orders API, `intent: CAPTURE`) before checkout, representing the amount to be collected; the frontend's PayPal Buttons drive the buyer's approval flow against this order id. |

@@ -10,7 +10,7 @@ import {
 } from './schemas/transaction.schema.js';
 
 export interface CreateTransactionInput {
-  razorpayOrderId: string;
+  paypalOrderId: string;
   amount: number;
   currency: string;
   items: TransactionItem[];
@@ -18,7 +18,7 @@ export interface CreateTransactionInput {
 
 export interface FinalizeTransactionPatch {
   status: Extract<TransactionStatus, 'DONE' | 'FAILED' | 'CANCELLED'>;
-  razorpayPaymentId?: string;
+  paypalCaptureId?: string;
   paymentMethod?: PaymentMethod;
   failureReason?: string;
 }
@@ -42,30 +42,30 @@ export class TransactionsService {
     return this.transactionModel.findById(id).exec();
   }
 
-  findByRazorpayOrderId(
-    razorpayOrderId: string,
+  findByPaypalOrderId(
+    paypalOrderId: string,
   ): Promise<TransactionDocument | null> {
-    return this.transactionModel.findOne({ razorpayOrderId }).exec();
+    return this.transactionModel.findOne({ paypalOrderId }).exec();
   }
 
   /**
    * Idempotent finalization: a transaction only ever leaves `INITIATED` once.
-   * A retried verify call or a webhook arriving after `/payment/verify` already
+   * A retried capture call or a webhook arriving after `/payment/capture` already
    * ran just returns the existing (already-final) document unchanged, so a
    * payment is never double-processed (specs/backend-spec.md Idempotency).
    */
   async finalizeIfInitiated(
-    razorpayOrderId: string,
+    paypalOrderId: string,
     patch: FinalizeTransactionPatch,
   ): Promise<TransactionDocument | null> {
     const updated = await this.transactionModel
       .findOneAndUpdate(
-        { razorpayOrderId, status: 'INITIATED' },
+        { paypalOrderId, status: 'INITIATED' },
         { $set: patch },
         { returnDocument: 'after' },
       )
       .exec();
 
-    return updated ?? this.findByRazorpayOrderId(razorpayOrderId);
+    return updated ?? this.findByPaypalOrderId(paypalOrderId);
   }
 }

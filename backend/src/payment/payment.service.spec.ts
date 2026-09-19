@@ -1,19 +1,10 @@
-import { NotFoundException } from '@nestjs/common';
-import { createHmac } from 'node:crypto';
+import { BadRequestException, NotFoundException } from '@nestjs/common';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { PaypalApiError } from './paypal-client.service.js';
 import { PaymentService } from './payment.service.js';
 
-const KEY_SECRET = 'test_key_secret';
-const WEBHOOK_SECRET = 'test_webhook_secret';
-
-function sign(orderId: string, paymentId: string, secret = KEY_SECRET): string {
-  return createHmac('sha256', secret)
-    .update(`${orderId}|${paymentId}`)
-    .digest('hex');
-}
-
 describe('PaymentService', () => {
-  let razorpay: { orders: { create: ReturnType<typeof vi.fn> } };
+  let paypal: { request: ReturnType<typeof vi.fn> };
   let configService: { getOrThrow: ReturnType<typeof vi.fn> };
   let itemsService: { findById: ReturnType<typeof vi.fn> };
   let transactionsService: {
@@ -24,12 +15,11 @@ describe('PaymentService', () => {
   let service: PaymentService;
 
   beforeEach(() => {
-    razorpay = { orders: { create: vi.fn() } };
+    paypal = { request: vi.fn() };
     configService = {
       getOrThrow: vi.fn((key: string) => {
-        if (key === 'RAZORPAY_KEY_SECRET') return KEY_SECRET;
-        if (key === 'RAZORPAY_WEBHOOK_SECRET') return WEBHOOK_SECRET;
-        if (key === 'RAZORPAY_KEY_ID') return 'rzp_test_id';
+        if (key === 'PAYPAL_CLIENT_ID') return 'sb-client-id';
+        if (key === 'PAYPAL_WEBHOOK_ID') return 'WH-123';
         throw new Error(`unexpected config key ${key}`);
       }),
     };
@@ -41,7 +31,7 @@ describe('PaymentService', () => {
     };
 
     service = new PaymentService(
-      razorpay as never,
+      paypal as never,
       configService as never,
       itemsService as never,
       transactionsService as never,
@@ -49,7 +39,7 @@ describe('PaymentService', () => {
   });
 
   describe('createOrder', () => {
-    it('computes the total server-side from catalog prices, not the client', async () => {
+    it('computes the total server-side from catalog prices and converts to a decimal string', async () => {
       itemsService.findById.mockImplementation((id: string) =>
         Promise.resolve(
           id === 'item-1'
@@ -57,7 +47,7 @@ describe('PaymentService', () => {
             : { id: 'item-2', name: 'Basketball', price: 4900 },
         ),
       );
-      razorpay.orders.create.mockResolvedValue({ id: 'order_abc' });
+      paypal.request.mockResolvedValue({ id: 'ORDER123' });
       transactionsService.create.mockResolvedValue({ id: 'txn_1' });
 
       const result = await service.createOrder({
@@ -67,13 +57,22 @@ describe('PaymentService', () => {
         ],
       });
 
-      const expectedAmount = 5400 * 2 + 4900 * 1;
-      expect(razorpay.orders.create).toHaveBeenCalledWith({
-        amount: expectedAmount,
-        currency: 'INR',
-      });
+      const expectedAmount = 5400 * 2 + 4900 * 1; // 15700 cents
+      expect(paypal.request).toHaveBeenCalledWith(
+        '/v2/checkout/orders',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({
+            intent: 'CAPTURE',
+            purchase_units: [
+              { amount: { currency_code: 'USD', value: '157.00' } },
+            ],
+          }),
+        }),
+      );
       expect(result.amount).toBe(expectedAmount);
-      expect(result.razorpayOrderId).toBe('order_abc');
+      expect(result.paypalOrderId).toBe('ORDER123');
+      expect(result.clientId).toBe('sb-client-id');
     });
 
     it('throws NotFoundException for an unknown item id', async () => {
@@ -82,60 +81,99 @@ describe('PaymentService', () => {
       await expect(
         service.createOrder({ items: [{ itemId: 'missing', quantity: 1 }] }),
       ).rejects.toThrow(NotFoundException);
-      expect(razorpay.orders.create).not.toHaveBeenCalled();
+      expect(paypal.request).not.toHaveBeenCalled();
     });
   });
 
-  describe('verify', () => {
-    it('finalizes as DONE when the signature is valid', async () => {
+  describe('capture', () => {
+    it('finalizes as DONE when PayPal reports a completed capture', async () => {
       transactionsService.findById.mockResolvedValue({
         id: 'txn_1',
-        razorpayOrderId: 'order_abc',
+        paypalOrderId: 'ORDER123',
+      });
+      paypal.request.mockResolvedValue({
+        status: 'COMPLETED',
+        purchase_units: [
+          { payments: { captures: [{ id: 'CAPTURE1', status: 'COMPLETED' }] } },
+        ],
       });
       transactionsService.finalizeIfInitiated.mockResolvedValue({
         status: 'DONE',
       });
 
-      const result = await service.verify({
+      const result = await service.capture({
         transactionId: 'txn_1',
-        razorpayOrderId: 'order_abc',
-        razorpayPaymentId: 'pay_xyz',
-        razorpaySignature: sign('order_abc', 'pay_xyz'),
+        paypalOrderId: 'ORDER123',
       });
 
       expect(result.status).toBe('DONE');
       expect(transactionsService.finalizeIfInitiated).toHaveBeenCalledWith(
-        'order_abc',
+        'ORDER123',
         {
           status: 'DONE',
-          razorpayPaymentId: 'pay_xyz',
+          paypalCaptureId: 'CAPTURE1',
+          paymentMethod: 'paypal',
         },
       );
     });
 
-    it('finalizes as FAILED when the signature does not match — not a thrown error', async () => {
+    it('finalizes as FAILED when PayPal reports a non-completed status — not a thrown error', async () => {
       transactionsService.findById.mockResolvedValue({
         id: 'txn_1',
-        razorpayOrderId: 'order_abc',
+        paypalOrderId: 'ORDER123',
+      });
+      paypal.request.mockResolvedValue({
+        status: 'DECLINED',
+        purchase_units: [
+          { payments: { captures: [{ id: 'CAPTURE1', status: 'DECLINED' }] } },
+        ],
       });
       transactionsService.finalizeIfInitiated.mockResolvedValue({
         status: 'FAILED',
-        failureReason: 'Signature verification failed',
+        failureReason: 'DECLINED',
       });
 
-      const result = await service.verify({
+      const result = await service.capture({
         transactionId: 'txn_1',
-        razorpayOrderId: 'order_abc',
-        razorpayPaymentId: 'pay_xyz',
-        razorpaySignature: 'not-the-right-signature',
+        paypalOrderId: 'ORDER123',
       });
 
       expect(result.status).toBe('FAILED');
       expect(transactionsService.finalizeIfInitiated).toHaveBeenCalledWith(
-        'order_abc',
+        'ORDER123',
         {
           status: 'FAILED',
-          failureReason: 'Signature verification failed',
+          failureReason: 'DECLINED',
+        },
+      );
+    });
+
+    it('finalizes as FAILED when PayPal returns an API error (e.g. instrument declined)', async () => {
+      transactionsService.findById.mockResolvedValue({
+        id: 'txn_1',
+        paypalOrderId: 'ORDER123',
+      });
+      paypal.request.mockRejectedValue(
+        new PaypalApiError(422, {
+          details: [{ issue: 'INSTRUMENT_DECLINED' }],
+        }),
+      );
+      transactionsService.finalizeIfInitiated.mockResolvedValue({
+        status: 'FAILED',
+        failureReason: 'INSTRUMENT_DECLINED',
+      });
+
+      const result = await service.capture({
+        transactionId: 'txn_1',
+        paypalOrderId: 'ORDER123',
+      });
+
+      expect(result.status).toBe('FAILED');
+      expect(transactionsService.finalizeIfInitiated).toHaveBeenCalledWith(
+        'ORDER123',
+        {
+          status: 'FAILED',
+          failureReason: 'INSTRUMENT_DECLINED',
         },
       );
     });
@@ -144,13 +182,27 @@ describe('PaymentService', () => {
       transactionsService.findById.mockResolvedValue(null);
 
       await expect(
-        service.verify({
+        service.capture({
           transactionId: 'missing',
-          razorpayOrderId: 'order_abc',
-          razorpayPaymentId: 'pay_xyz',
-          razorpaySignature: sign('order_abc', 'pay_xyz'),
+          paypalOrderId: 'ORDER123',
         }),
       ).rejects.toThrow(NotFoundException);
+      expect(paypal.request).not.toHaveBeenCalled();
+    });
+
+    it('propagates a non-422 PayPal error instead of recording it as a customer decline', async () => {
+      transactionsService.findById.mockResolvedValue({
+        id: 'txn_1',
+        paypalOrderId: 'ORDER123',
+      });
+      paypal.request.mockRejectedValue(new PaypalApiError(401, { message: 'Auth failed' }));
+
+      await expect(
+        service.capture({ transactionId: 'txn_1', paypalOrderId: 'ORDER123' }),
+      ).rejects.toThrow(PaypalApiError);
+      // A 401 means our own credentials/integration are broken, not that the
+      // customer's payment was declined — the transaction must stay INITIATED.
+      expect(transactionsService.finalizeIfInitiated).not.toHaveBeenCalled();
     });
   });
 
@@ -158,7 +210,7 @@ describe('PaymentService', () => {
     it('finalizes an existing transaction as CANCELLED', async () => {
       transactionsService.findById.mockResolvedValue({
         id: 'txn_1',
-        razorpayOrderId: 'order_abc',
+        paypalOrderId: 'ORDER123',
       });
       transactionsService.finalizeIfInitiated.mockResolvedValue({
         status: 'CANCELLED',
@@ -168,7 +220,7 @@ describe('PaymentService', () => {
 
       expect(result.status).toBe('CANCELLED');
       expect(transactionsService.finalizeIfInitiated).toHaveBeenCalledWith(
-        'order_abc',
+        'ORDER123',
         {
           status: 'CANCELLED',
         },
@@ -185,37 +237,34 @@ describe('PaymentService', () => {
   });
 
   describe('handleWebhook', () => {
-    const rawBody = Buffer.from(
-      JSON.stringify({
-        event: 'payment.captured',
-        payload: {
-          payment: {
-            entity: { order_id: 'order_abc', id: 'pay_xyz', method: 'upi' },
-          },
-        },
-      }),
-    );
+    const event = {
+      event_type: 'PAYMENT.CAPTURE.COMPLETED',
+      resource: {
+        id: 'CAPTURE1',
+        supplementary_data: { related_ids: { order_id: 'ORDER123' } },
+      },
+    };
 
-    it('rejects a webhook with an invalid signature', async () => {
-      await expect(
-        service.handleWebhook(rawBody, 'bad-signature'),
-      ).rejects.toThrow('Invalid webhook signature');
+    it('rejects a webhook PayPal cannot verify', async () => {
+      paypal.request.mockResolvedValue({ verification_status: 'FAILURE' });
+
+      await expect(service.handleWebhook({}, event)).rejects.toThrow(
+        BadRequestException,
+      );
       expect(transactionsService.finalizeIfInitiated).not.toHaveBeenCalled();
     });
 
-    it('finalizes as DONE for a valid payment.captured webhook', async () => {
-      const validSignature = createHmac('sha256', WEBHOOK_SECRET)
-        .update(rawBody)
-        .digest('hex');
+    it('finalizes as DONE for a verified payment.capture.completed webhook', async () => {
+      paypal.request.mockResolvedValue({ verification_status: 'SUCCESS' });
 
-      await service.handleWebhook(rawBody, validSignature);
+      await service.handleWebhook({}, event);
 
       expect(transactionsService.finalizeIfInitiated).toHaveBeenCalledWith(
-        'order_abc',
+        'ORDER123',
         {
           status: 'DONE',
-          razorpayPaymentId: 'pay_xyz',
-          paymentMethod: 'upi',
+          paypalCaptureId: 'CAPTURE1',
+          paymentMethod: 'paypal',
         },
       );
     });

@@ -12,7 +12,7 @@ export const TRANSACTION_STATUSES = [
 ] as const;
 export type TransactionStatus = (typeof TRANSACTION_STATUSES)[number];
 
-export const PAYMENT_METHODS = ['card', 'upi', 'netbanking'] as const;
+export const PAYMENT_METHODS = ['paypal'] as const;
 export type PaymentMethod = (typeof PAYMENT_METHODS)[number];
 
 @Schema({ _id: false })
@@ -36,10 +36,10 @@ export const TransactionItemSchema =
 @Schema({ timestamps: true, toJSON: { transform: toIdJson } })
 export class Transaction {
   @Prop({ type: String, required: true, unique: true })
-  razorpayOrderId: string;
+  paypalOrderId: string;
 
   @Prop({ type: String, default: null })
-  razorpayPaymentId: string | null;
+  paypalCaptureId: string | null;
 
   @Prop({
     type: String,
@@ -49,11 +49,11 @@ export class Transaction {
   })
   status: TransactionStatus;
 
-  /** Server-computed total, in paise — never trusted from the client. */
+  /** Server-computed total, in minor currency units (e.g. cents) — never trusted from the client. */
   @Prop({ type: Number, required: true })
   amount: number;
 
-  @Prop({ type: String, required: true, default: 'INR' })
+  @Prop({ type: String, required: true, default: 'USD' })
   currency: string;
 
   /** Snapshot of the purchased items at checkout time. */

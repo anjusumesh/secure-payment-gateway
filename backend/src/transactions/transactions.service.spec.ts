@@ -15,19 +15,19 @@ describe('TransactionsService', () => {
 
   describe('finalizeIfInitiated', () => {
     it('updates the transaction when it is still INITIATED', async () => {
-      const updatedDoc = { razorpayOrderId: 'order_abc', status: 'DONE' };
+      const updatedDoc = { paypalOrderId: 'order_abc', status: 'DONE' };
       model.findOneAndUpdate.mockReturnValue({
         exec: () => Promise.resolve(updatedDoc),
       });
 
       const result = await service.finalizeIfInitiated('order_abc', {
         status: 'DONE',
-        razorpayPaymentId: 'pay_xyz',
+        paypalCaptureId: 'capture_xyz',
       });
 
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
-        { razorpayOrderId: 'order_abc', status: 'INITIATED' },
-        { $set: { status: 'DONE', razorpayPaymentId: 'pay_xyz' } },
+        { paypalOrderId: 'order_abc', status: 'INITIATED' },
+        { $set: { status: 'DONE', paypalCaptureId: 'capture_xyz' } },
         { returnDocument: 'after' },
       );
       expect(result).toBe(updatedDoc);
@@ -42,7 +42,7 @@ describe('TransactionsService', () => {
       model.findOneAndUpdate.mockReturnValue({
         exec: () => Promise.resolve(null),
       });
-      const existingDoc = { razorpayOrderId: 'order_abc', status: 'DONE' };
+      const existingDoc = { paypalOrderId: 'order_abc', status: 'DONE' };
       model.findOne.mockReturnValue({
         exec: () => Promise.resolve(existingDoc),
       });

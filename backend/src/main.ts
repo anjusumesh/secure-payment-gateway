@@ -5,9 +5,7 @@ import { AllExceptionsFilter } from './common/filters/all-exceptions.filter.js';
 import { AppModule } from './app.module.js';
 
 async function bootstrap() {
-  // rawBody is required so /payment/webhook can verify Razorpay's HMAC
-  // signature over the exact bytes received (specs/backend-spec.md Architecture).
-  const app = await NestFactory.create(AppModule, { rawBody: true });
+  const app = await NestFactory.create(AppModule);
 
   const configService = app.get(ConfigService);
   const allowedOrigins = (

@@ -1,56 +1,55 @@
 import {
   BadRequestException,
-  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
-import { createHmac, timingSafeEqual } from 'node:crypto';
-import type Razorpay from 'razorpay';
+import { randomUUID } from 'node:crypto';
 import { ItemsService } from '../items/items.service.js';
-import {
-  PaymentMethod,
-  PAYMENT_METHODS,
-  TransactionItem,
-} from '../transactions/schemas/transaction.schema.js';
+import { TransactionItem } from '../transactions/schemas/transaction.schema.js';
 import { TransactionsService } from '../transactions/transactions.service.js';
 import { CancelPaymentDto } from './dto/cancel-payment.dto.js';
+import { CapturePaymentDto } from './dto/capture-payment.dto.js';
 import { CreateOrderDto } from './dto/create-order.dto.js';
-import { VerifyPaymentDto } from './dto/verify-payment.dto.js';
-import { RAZORPAY_CLIENT } from './razorpay.provider.js';
+import {
+  PaypalApiError,
+  PaypalClientService,
+} from './paypal-client.service.js';
+import type {
+  PaypalCaptureOrderResponse,
+  PaypalOrder,
+  PaypalWebhookEvent,
+  PaypalWebhookVerifyResponse,
+} from './paypal.types.js';
 
 export interface CreateOrderResult {
   transactionId: string;
-  razorpayOrderId: string;
+  paypalOrderId: string;
   amount: number;
   currency: string;
-  keyId: string;
+  clientId: string;
 }
 
-interface RazorpayWebhookPayload {
-  event: string;
-  payload: {
-    payment: {
-      entity: {
-        order_id: string;
-        id: string;
-        method?: string;
-        error_description?: string;
-      };
-    };
-  };
+const CURRENCY = 'USD';
+
+function toDecimalAmount(minorUnits: number): string {
+  return (minorUnits / 100).toFixed(2);
 }
 
-const CURRENCY = 'INR';
-
-function isPaymentMethod(value: string | undefined): value is PaymentMethod {
-  return !!value && (PAYMENT_METHODS as readonly string[]).includes(value);
+function extractPaypalIssue(body: unknown): string {
+  if (body && typeof body === 'object') {
+    const details = (body as { details?: Array<{ issue?: string }> }).details;
+    if (details?.[0]?.issue) return details[0].issue;
+    const message = (body as { message?: unknown }).message;
+    if (typeof message === 'string') return message;
+  }
+  return 'Capture failed';
 }
 
 @Injectable()
 export class PaymentService {
   constructor(
-    @Inject(RAZORPAY_CLIENT) private readonly razorpay: Razorpay,
+    private readonly paypal: PaypalClientService,
     private readonly configService: ConfigService,
     private readonly itemsService: ItemsService,
     private readonly transactionsService: TransactionsService,
@@ -78,13 +77,27 @@ export class PaymentService {
       });
     }
 
-    const razorpayOrder = await this.razorpay.orders.create({
-      amount,
-      currency: CURRENCY,
-    });
+    const paypalOrder = await this.paypal.request<PaypalOrder>(
+      '/v2/checkout/orders',
+      {
+        method: 'POST',
+        headers: { 'PayPal-Request-Id': randomUUID() },
+        body: JSON.stringify({
+          intent: 'CAPTURE',
+          purchase_units: [
+            {
+              amount: {
+                currency_code: CURRENCY,
+                value: toDecimalAmount(amount),
+              },
+            },
+          ],
+        }),
+      },
+    );
 
     const transaction = await this.transactionsService.create({
-      razorpayOrderId: razorpayOrder.id,
+      paypalOrderId: paypalOrder.id,
       amount,
       currency: CURRENCY,
       items: lineItems,
@@ -92,54 +105,79 @@ export class PaymentService {
 
     return {
       transactionId: transaction.id as string,
-      razorpayOrderId: razorpayOrder.id,
+      paypalOrderId: paypalOrder.id,
       amount,
       currency: CURRENCY,
-      keyId: this.configService.getOrThrow<string>('RAZORPAY_KEY_ID'),
+      clientId: this.configService.getOrThrow<string>('PAYPAL_CLIENT_ID'),
     };
   }
 
   /**
-   * A signature mismatch or gateway-reported decline is a normal business
-   * outcome, not a client error — callers return this as a 200
-   * (specs/api-contract.md POST /payment/verify).
+   * There is no client-supplied proof to check here (unlike a signature
+   * scheme) — the backend calls PayPal's own capture endpoint and trusts
+   * that response directly. A decline is a normal business outcome, not a
+   * client error (specs/api-contract.md POST /payment/capture).
    */
-  async verify(
-    dto: VerifyPaymentDto,
+  async capture(
+    dto: CapturePaymentDto,
   ): Promise<{ status: string; reason?: string }> {
     const transaction = await this.transactionsService.findById(
       dto.transactionId,
     );
-    if (!transaction || transaction.razorpayOrderId !== dto.razorpayOrderId) {
+    if (!transaction || transaction.paypalOrderId !== dto.paypalOrderId) {
       throw new NotFoundException('Transaction not found');
     }
 
-    const isValid = this.verifySignature(
-      dto.razorpayOrderId,
-      dto.razorpayPaymentId,
-      dto.razorpaySignature,
-    );
+    try {
+      const result = await this.paypal.request<PaypalCaptureOrderResponse>(
+        `/v2/checkout/orders/${dto.paypalOrderId}/capture`,
+        { method: 'POST', body: JSON.stringify({}) },
+      );
 
-    const updated = isValid
-      ? await this.transactionsService.finalizeIfInitiated(
-          dto.razorpayOrderId,
-          {
-            status: 'DONE',
-            razorpayPaymentId: dto.razorpayPaymentId,
-          },
-        )
-      : await this.transactionsService.finalizeIfInitiated(
-          dto.razorpayOrderId,
-          {
-            status: 'FAILED',
-            failureReason: 'Signature verification failed',
-          },
+      const capture = result.purchase_units[0]?.payments?.captures?.[0];
+      const isCompleted =
+        result.status === 'COMPLETED' && capture?.status === 'COMPLETED';
+
+      const updated = isCompleted
+        ? await this.transactionsService.finalizeIfInitiated(
+            dto.paypalOrderId,
+            {
+              status: 'DONE',
+              paypalCaptureId: capture?.id,
+              paymentMethod: 'paypal',
+            },
+          )
+        : await this.transactionsService.finalizeIfInitiated(
+            dto.paypalOrderId,
+            {
+              status: 'FAILED',
+              failureReason: capture?.status ?? result.status,
+            },
+          );
+
+      return {
+        status: updated?.status ?? 'FAILED',
+        reason: updated?.failureReason ?? undefined,
+      };
+    } catch (err) {
+      // Only a 422 UNPROCESSABLE_ENTITY is PayPal's documented shape for a
+      // declined payment (a normal business outcome). Anything else — a 401
+      // from misconfigured credentials, a 5xx, a network failure — means our
+      // own integration is broken, not that the customer's payment failed,
+      // so it must NOT be recorded as a customer-facing FAILED transaction;
+      // let it propagate to the global exception filter as a genuine 500.
+      if (err instanceof PaypalApiError && err.status === 422) {
+        const updated = await this.transactionsService.finalizeIfInitiated(
+          dto.paypalOrderId,
+          { status: 'FAILED', failureReason: extractPaypalIssue(err.body) },
         );
-
-    return {
-      status: updated?.status ?? 'FAILED',
-      reason: updated?.failureReason ?? undefined,
-    };
+        return {
+          status: updated?.status ?? 'FAILED',
+          reason: updated?.failureReason ?? undefined,
+        };
+      }
+      throw err;
+    }
   }
 
   async cancel(dto: CancelPaymentDto): Promise<{ status: string }> {
@@ -151,87 +189,62 @@ export class PaymentService {
     }
 
     const updated = await this.transactionsService.finalizeIfInitiated(
-      transaction.razorpayOrderId,
-      { status: 'CANCELLED' },
+      transaction.paypalOrderId,
+      {
+        status: 'CANCELLED',
+      },
     );
 
     return { status: updated?.status ?? 'CANCELLED' };
   }
 
   /**
-   * Authoritative fallback confirmation, applying the same idempotent update
-   * as verify() — see specs/backend-spec.md Architecture step 6.
+   * Authoritative fallback confirmation. PayPal verifies its own signature
+   * server-to-server — we call verify-webhook-signature rather than
+   * computing an HMAC locally (specs/backend-spec.md Architecture step 6).
    */
   async handleWebhook(
-    rawBody: Buffer,
-    signature: string | undefined,
+    headers: Record<string, string | string[] | undefined>,
+    event: PaypalWebhookEvent,
   ): Promise<void> {
-    const webhookSecret = this.configService.getOrThrow<string>(
-      'RAZORPAY_WEBHOOK_SECRET',
+    const webhookId =
+      this.configService.getOrThrow<string>('PAYPAL_WEBHOOK_ID');
+
+    const verification = await this.paypal.request<PaypalWebhookVerifyResponse>(
+      '/v1/notifications/verify-webhook-signature',
+      {
+        method: 'POST',
+        body: JSON.stringify({
+          auth_algo: headers['paypal-auth-algo'],
+          cert_url: headers['paypal-cert-url'],
+          transmission_id: headers['paypal-transmission-id'],
+          transmission_sig: headers['paypal-transmission-sig'],
+          transmission_time: headers['paypal-transmission-time'],
+          webhook_id: webhookId,
+          webhook_event: event,
+        }),
+      },
     );
-    if (
-      !signature ||
-      !this.verifyWebhookSignature(rawBody, signature, webhookSecret)
-    ) {
+
+    if (verification.verification_status !== 'SUCCESS') {
       throw new BadRequestException('Invalid webhook signature');
     }
 
-    const payload = JSON.parse(
-      rawBody.toString('utf8'),
-    ) as RazorpayWebhookPayload;
-    const paymentEntity = payload.payload.payment.entity;
+    const orderId = event.resource.supplementary_data?.related_ids?.order_id;
+    if (!orderId) return;
 
-    if (payload.event === 'payment.captured') {
-      await this.transactionsService.finalizeIfInitiated(
-        paymentEntity.order_id,
-        {
-          status: 'DONE',
-          razorpayPaymentId: paymentEntity.id,
-          ...(isPaymentMethod(paymentEntity.method)
-            ? { paymentMethod: paymentEntity.method }
-            : {}),
-        },
-      );
-    } else if (payload.event === 'payment.failed') {
-      await this.transactionsService.finalizeIfInitiated(
-        paymentEntity.order_id,
-        {
-          status: 'FAILED',
-          failureReason: paymentEntity.error_description ?? 'Payment failed',
-        },
-      );
+    if (event.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
+      await this.transactionsService.finalizeIfInitiated(orderId, {
+        status: 'DONE',
+        paypalCaptureId: event.resource.id,
+        paymentMethod: 'paypal',
+      });
+    } else if (event.event_type === 'PAYMENT.CAPTURE.DENIED') {
+      await this.transactionsService.finalizeIfInitiated(orderId, {
+        status: 'FAILED',
+        failureReason:
+          event.resource.status_details?.reason ?? 'Payment denied',
+      });
     }
-  }
-
-  private verifySignature(
-    orderId: string,
-    paymentId: string,
-    signature: string,
-  ): boolean {
-    const keySecret = this.configService.getOrThrow<string>(
-      'RAZORPAY_KEY_SECRET',
-    );
-    const expected = createHmac('sha256', keySecret)
-      .update(`${orderId}|${paymentId}`)
-      .digest('hex');
-    return this.safeCompare(expected, signature);
-  }
-
-  private verifyWebhookSignature(
-    rawBody: Buffer,
-    signature: string,
-    secret: string,
-  ): boolean {
-    const expected = createHmac('sha256', secret).update(rawBody).digest('hex');
-    return this.safeCompare(expected, signature);
-  }
-
-  private safeCompare(expected: string, actual: string): boolean {
-    const expectedBuffer = Buffer.from(expected, 'utf8');
-    const actualBuffer = Buffer.from(actual, 'utf8');
-    if (expectedBuffer.length !== actualBuffer.length) {
-      return false;
-    }
-    return timingSafeEqual(expectedBuffer, actualBuffer);
   }
 }
