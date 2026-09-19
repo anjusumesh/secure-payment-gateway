@@ -30,6 +30,7 @@ application-secrets.yml
 # Environment / secrets
 .env
 .env.*
+!.env.example
 *.pem
 *.p12
 *.jks
@@ -50,3 +51,4 @@ Thumbs.db
 node_modules/
 dist/
 npm-debug.log*
+*.tsbuildinfo
