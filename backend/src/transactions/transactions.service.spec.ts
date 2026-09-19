@@ -28,7 +28,7 @@ describe('TransactionsService', () => {
       expect(model.findOneAndUpdate).toHaveBeenCalledWith(
         { razorpayOrderId: 'order_abc', status: 'INITIATED' },
         { $set: { status: 'DONE', razorpayPaymentId: 'pay_xyz' } },
-        { new: true },
+        { returnDocument: 'after' },
       );
       expect(result).toBe(updatedDoc);
       // A terminal transaction is never re-read once the atomic update succeeds.

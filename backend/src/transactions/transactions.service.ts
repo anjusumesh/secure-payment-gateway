@@ -62,7 +62,7 @@ export class TransactionsService {
       .findOneAndUpdate(
         { razorpayOrderId, status: 'INITIATED' },
         { $set: patch },
-        { new: true },
+        { returnDocument: 'after' },
       )
       .exec();
 

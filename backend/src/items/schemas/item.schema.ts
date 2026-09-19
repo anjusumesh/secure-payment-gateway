@@ -1,9 +1,10 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
+import { toIdJson } from '../../common/mongoose/to-json-transform.js';
 
 export type ItemDocument = HydratedDocument<Item>;
 
-@Schema({ timestamps: true })
+@Schema({ timestamps: true, toJSON: { transform: toIdJson } })
 export class Item {
   @Prop({ type: String, required: true })
   name: string;

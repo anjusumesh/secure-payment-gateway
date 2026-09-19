@@ -1,5 +1,6 @@
 import { Prop, Schema, SchemaFactory } from '@nestjs/mongoose';
 import { HydratedDocument } from 'mongoose';
+import { toIdJson } from '../../common/mongoose/to-json-transform.js';
 
 export type TransactionDocument = HydratedDocument<Transaction>;
 
@@ -32,7 +33,7 @@ export class TransactionItem {
 export const TransactionItemSchema =
   SchemaFactory.createForClass(TransactionItem);
 
-@Schema({ timestamps: true })
+@Schema({ timestamps: true, toJSON: { transform: toIdJson } })
 export class Transaction {
   @Prop({ type: String, required: true, unique: true })
   razorpayOrderId: string;
