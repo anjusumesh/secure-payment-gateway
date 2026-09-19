@@ -17,6 +17,10 @@ export function PaymentPage() {
   const [error, setError] = useState<string | null>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   const transactionIdRef = useRef<string | null>(null);
+  // Captured once, at mount — a successful payment calls clear() further down,
+  // which must NOT retroactively make this guard think the cart was always
+  // empty and redirect away from the success/error navigation that follows.
+  const hadItemsOnMountRef = useRef(lines.length > 0);
 
   useEffect(() => {
     const clientId = import.meta.env.VITE_PAYPAL_CLIENT_ID;
@@ -51,10 +55,10 @@ export function PaymentPage() {
               paypalOrderId: data.orderID,
             });
 
-            clear();
             navigate(result.status === 'DONE' ? '/payment/success' : '/payment/error', {
               state: { transactionId },
             });
+            clear();
           },
           onCancel: () => {
             const transactionId = transactionIdRef.current;
@@ -81,7 +85,7 @@ export function PaymentPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  if (lines.length === 0) {
+  if (!hadItemsOnMountRef.current) {
     return <Navigate to="/cart" replace />;
   }
 
