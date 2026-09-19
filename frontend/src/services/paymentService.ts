@@ -1,8 +1,8 @@
 import { api } from './api.ts';
 import type {
+  CapturePaymentRequest,
+  CapturePaymentResponse,
   CreateOrderResponse,
-  VerifyPaymentRequest,
-  VerifyPaymentResponse,
 } from '../types/index.ts';
 
 export interface CreateOrderItem {
@@ -16,8 +16,8 @@ export const paymentService = {
     return data;
   },
 
-  async verify(payload: VerifyPaymentRequest): Promise<VerifyPaymentResponse> {
-    const { data } = await api.post<VerifyPaymentResponse>('/payment/verify', payload);
+  async capture(payload: CapturePaymentRequest): Promise<CapturePaymentResponse> {
+    const { data } = await api.post<CapturePaymentResponse>('/payment/capture', payload);
     return data;
   },
 

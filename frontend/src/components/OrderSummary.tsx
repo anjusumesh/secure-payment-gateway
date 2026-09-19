@@ -45,9 +45,7 @@ export function OrderSummary({ total, disabled, onCheckout }: OrderSummaryProps)
 
       <div style={{ marginTop: 20 }}>
         <div style={{ fontWeight: 600, marginBottom: 8 }}>We Accept</div>
-        <div style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>
-          Card · UPI · Net Banking (via Razorpay)
-        </div>
+        <div style={{ fontSize: 14, color: 'var(--color-text-muted)' }}>PayPal</div>
       </div>
     </aside>
   );

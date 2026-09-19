@@ -5,7 +5,7 @@ export interface Item {
   name: string;
   code: string;
   imageUrl: string;
-  /** Integer, smallest currency unit (paise). */
+  /** Integer, smallest currency unit (e.g. cents). */
   price: number;
 }
 
@@ -15,7 +15,7 @@ export interface CartLine {
 }
 
 export type TransactionStatus = 'INITIATED' | 'DONE' | 'FAILED' | 'CANCELLED';
-export type PaymentMethod = 'card' | 'upi' | 'netbanking';
+export type PaymentMethod = 'paypal';
 
 export interface TransactionSummary {
   id: string;
@@ -40,20 +40,18 @@ export interface TransactionDetail extends TransactionSummary {
 
 export interface CreateOrderResponse {
   transactionId: string;
-  razorpayOrderId: string;
+  paypalOrderId: string;
   amount: number;
   currency: string;
-  keyId: string;
+  clientId: string;
 }
 
-export interface VerifyPaymentRequest {
+export interface CapturePaymentRequest {
   transactionId: string;
-  razorpayOrderId: string;
-  razorpayPaymentId: string;
-  razorpaySignature: string;
+  paypalOrderId: string;
 }
 
-export interface VerifyPaymentResponse {
+export interface CapturePaymentResponse {
   status: TransactionStatus;
   reason?: string;
 }
