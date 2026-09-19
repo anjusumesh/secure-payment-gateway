@@ -1,0 +1,96 @@
+/* Design tokens — specs/frontend-spec.md Visual Design */
+:root {
+  --color-bg: #ffffff;
+  --color-bg-secondary: #e8dcc9;
+  --color-primary: #14213d;
+  --color-primary-hover: #0e1830;
+  --color-text: #14213d;
+  --color-text-muted: #6b6f76;
+  --color-text-on-primary: #ffffff;
+  --color-border: #e2ddd2;
+
+  --color-status-done: #2e7d32;
+  --color-status-failed: #c62828;
+  --color-status-cancelled: #8a7b6c;
+
+  --font-sans:
+    'Fira Sans', -apple-system, 'Segoe UI', Roboto, sans-serif;
+
+  color-scheme: light;
+  color: var(--color-text);
+  background: var(--color-bg);
+  font-family: var(--font-sans);
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+* {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--color-bg);
+  color: var(--color-text);
+}
+
+#root {
+  min-height: 100svh;
+  display: flex;
+  flex-direction: column;
+}
+
+h1,
+h2,
+h3 {
+  margin: 0 0 0.5em;
+  color: var(--color-text);
+}
+
+button {
+  font-family: inherit;
+}
+
+a {
+  color: var(--color-primary);
+}
+
+.container {
+  width: min(1100px, 100%);
+  margin: 0 auto;
+  padding-inline: 20px;
+}
+
+.btn-primary {
+  background: var(--color-primary);
+  color: var(--color-text-on-primary);
+  border: none;
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+
+.btn-primary:hover:not(:disabled) {
+  background: var(--color-primary-hover);
+}
+
+.btn-primary:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.btn-secondary {
+  background: var(--color-bg);
+  color: var(--color-primary);
+  border: 1px solid var(--color-primary);
+  border-radius: 8px;
+  padding: 12px 20px;
+  font-size: 16px;
+  font-weight: 600;
+  cursor: pointer;
+}
