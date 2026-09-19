@@ -15,6 +15,7 @@ No end-user login (out of scope — [[goal-spec]]). All endpoints below are unau
 | `POST` | `/payment/create-order` | Recompute the total server-side and create a Razorpay order + `INITIATED` transaction. |
 | `POST` | `/payment/verify` | Verify the payment signature returned by Checkout.js and finalize the transaction as `DONE`/`FAILED`. |
 | `POST` | `/payment/webhook` | Receive Razorpay's async `payment.captured`/`payment.failed` event (authoritative fallback). |
+| `POST` | `/payment/cancel` | Mark a transaction `CANCELLED` when the user closes the Checkout widget without paying. |
 | `GET` | `/transactions` | List transaction history. |
 | `GET` | `/transactions/:id` | Get one transaction's status/detail (used by the Success/Error pages). |
 
@@ -67,6 +68,17 @@ A signature mismatch or gateway-reported decline is a normal **business outcome*
 ### `POST /payment/webhook`
 Called by Razorpay only, with header `X-Razorpay-Signature`. **Response `200`** `{ "received": true }` on success (required by Razorpay to stop retries); **`400`** if the signature doesn't verify. Applies the same idempotent update as `/payment/verify` (see [[backend-spec]] Idempotency).
 
+### `POST /payment/cancel`
+**Request:**
+```json
+{ "transactionId": "66a1..." }
+```
+**Response `200`:**
+```json
+{ "status": "CANCELLED" }
+```
+Called by the frontend's Checkout.js `ondismiss` handler ([[frontend-spec]]) so an abandoned checkout doesn't stay stuck at `INITIATED` forever. Only transitions a transaction that is still `INITIATED`; if it has already reached `DONE`/`FAILED` (e.g. the webhook beat the dismiss event), the existing status is kept and returned as-is rather than overwritten — same idempotent-update rule as `/payment/verify`.
+
 ### `GET /transactions`
 **Response `200`:** array of transaction summaries, newest first:
 ```json
@@ -105,7 +117,7 @@ All responses use these shapes consistently; `/transactions` returns a trimmed s
 ## Error Handling
 - Standard NestJS error shape: `{ "statusCode": number, "message": string | string[], "error": string }`.
 - `400 Bad Request` — validation failures (e.g. missing `itemId`, `quantity <= 0`), via `class-validator` DTOs.
-- `404 Not Found` — unknown `itemId` in `create-order`, or unknown `:id` in `GET /transactions/:id`.
+- `404 Not Found` — unknown `itemId` in `create-order`, unknown `:id` in `GET /transactions/:id`, or unknown `transactionId` in `/payment/cancel`.
 - `400 Bad Request` — invalid/missing webhook signature on `POST /payment/webhook`.
 - `500 Internal Server Error` — unexpected failures (e.g. Razorpay API unreachable); the response body must **never** include Razorpay SDK internals, stack traces, or the key secret/webhook secret ([[frontend-spec]] UX/Security: don't leak gateway internals to the client).
 - A failed/declined payment is **not** an HTTP error — see `/payment/verify` above; it's a normal `200` response carrying `status: "FAILED"`.

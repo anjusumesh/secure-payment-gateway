@@ -21,7 +21,7 @@ A NestJS API that manages the cart-to-payment flow: creates Razorpay orders, ver
 4. Frontend opens Razorpay Checkout.js against that order id ([[frontend-spec]]).
 5. On completion, Razorpay returns a payment id, order id, and signature to the frontend, which forwards them to `POST /payment/verify`. The backend recomputes the HMAC signature using the **key secret** and updates the `Transaction` to `DONE` (valid + captured) or `FAILED` (invalid signature or gateway-reported failure).
 6. Razorpay also sends an asynchronous **webhook** (`payment.captured` / `payment.failed`) to the backend as the authoritative fallback, in case step 5 never completes (e.g. the browser tab closes before the frontend can call `/payment/verify`). The webhook handler applies the same idempotent update.
-7. If the user closes the Checkout widget without paying, the frontend reports this so the backend can mark the `Transaction` `CANCELLED` rather than leaving it stuck at `INITIATED`.
+7. If the user closes the Checkout widget without paying, the frontend calls `POST /payment/cancel` ([[api-contract]]) so the backend can mark the `Transaction` `CANCELLED` rather than leaving it stuck at `INITIATED`.
 
 **Idempotency:** both `/payment/verify` and the webhook handler look up the `Transaction` by `razorpayOrderId` and update it rather than creating a new record, so a retried request or a webhook arriving after `/payment/verify` already ran does not double-process the same payment ([[goal-spec]] Idempotency).
 
@@ -55,6 +55,15 @@ MongoDB storage (via Mongoose), two collections:
 - Ensure secure payment handling; choose the best practices available for a demo of this scope.
 - **CORS:** restrict allowed origins to the deployed frontend's Vercel domain(s) — the production domain plus this project's Vercel preview URL pattern during development ([[frontend-spec]]). Do not use a wildcard (`*`) origin, since credentials/cookies or sensitive responses may be involved.
 - Keep the Razorpay **key secret** and **webhook secret** in backend environment variables only — never returned in any API response or logged.
+
+**Configuration (backend environment variables):**
+| Variable | Purpose |
+|---|---|
+| `MONGODB_URI` | MongoDB connection string. |
+| `RAZORPAY_KEY_ID` | Razorpay **public** test key id — returned to the frontend per-request via `POST /payment/create-order`'s `keyId` field ([[api-contract]]), not baked into the frontend build, so there's a single source of truth. |
+| `RAZORPAY_KEY_SECRET` | Used server-side only, to verify payment signatures. |
+| `RAZORPAY_WEBHOOK_SECRET` | Used server-side only, to verify incoming webhook signatures (separate from `RAZORPAY_KEY_SECRET`). |
+| `CORS_ALLOWED_ORIGINS` | The frontend's Vercel production + preview origin(s). |
 
 ## Third-Party Integrations
 - **Razorpay** (test/sandbox mode), specifically:

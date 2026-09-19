@@ -52,7 +52,7 @@ This same card-row pattern (thumbnail + name/code + price, on a white card with 
 - **Client-side routing:** React Router needs a SPA rewrite rule (`vercel.json` with a catch-all rewrite to `/index.html`, or Vercel's framework preset for Vite/SPA) so that a hard refresh/direct link on `/cart`, `/payment`, etc. doesn't 404.
 - **Environment variables:** set in the Vercel project settings (not committed to the repo):
   - `VITE_API_BASE_URL` — the deployed NestJS backend's URL ([[backend-spec]]).
-  - `VITE_RAZORPAY_KEY_ID` — Razorpay's public **test** key id (safe to expose client-side; the key **secret** never goes here or into any frontend code — see [[backend-spec]]).
+  - The Razorpay **key id** is *not* a frontend env var — it's returned per-request in `POST /payment/create-order`'s response ([[api-contract]]), so it stays in sync with whatever key the backend is actually configured with. The key **secret** never reaches the frontend at all ([[backend-spec]]).
 - **HTTPS:** provided automatically by Vercel, satisfying the HTTPS-only requirement below.
 - **Preview deployments:** every branch/PR gets its own Vercel preview URL. The backend's CORS allowlist ([[backend-spec]]) needs to account for these in addition to the production domain (e.g. allow the production domain plus a `*.vercel.app` pattern for this project during development).
 
@@ -70,12 +70,12 @@ This same card-row pattern (thumbnail + name/code + price, on a white card with 
 - `Cart` / `CartItem` — renders selected items, quantities, and running total (see [Layout Reference](#layout-reference)).
 - `QuantityStepper` — the `− [qty] +` control used on each `CartItem` row.
 - `OrderSummary` — the right-hand sidebar on the Cart page (Sub-Total, Check Out button, accepted-methods row — no delivery/shipping, out of scope).
-- `Payment` — requests a Razorpay order from the backend and launches Razorpay Checkout.js.
+- `Payment` — requests a Razorpay order from the backend, launches Razorpay Checkout.js, and calls `paymentService.cancel()` on the widget's `ondismiss` event if the user closes it without paying.
 - `PaymentSuccess` — success confirmation view.
 - `PaymentError` — failure/cancellation view.
 - `Header` — shared nav bar (e.g. cart item count).
 - `CartContext` (+ `useCart` hook) — holds cart state and exposes add/remove/total logic to components.
-- `paymentService` (plain module, not a component) — calls the backend to create a Razorpay order and to verify/fetch the final transaction status.
+- `paymentService` (plain module, not a component) — calls the backend to create a Razorpay order, verify/fetch the final transaction status, and cancel an abandoned checkout (`POST /payment/cancel`, [[api-contract]]).
 
 ## State Management
 - Cart state held client-side in `CartContext` (React Context + `useReducer`/`useState`), not persisted server-side until checkout begins.
