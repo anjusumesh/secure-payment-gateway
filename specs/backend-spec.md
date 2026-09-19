@@ -70,3 +70,11 @@ MongoDB storage (via Mongoose), two collections:
   - **Orders API** — to create an order before checkout ([[frontend-spec]] Payment page).
   - **Payment signature verification** — HMAC-SHA256 over `order_id|payment_id` using the key secret, done server-side only.
   - **Webhooks** — `payment.captured` / `payment.failed` events, verified using the separate webhook secret, as the authoritative fallback confirmation.
+
+## Deployment
+- **Host:** Render (Web Service), deployed from the same git repo as the frontend. Build command `npm install && npm run build`; start command `npm run start:prod`. The app must read its listen port from `process.env.PORT` (Render assigns this).
+- **Database:** MongoDB Atlas (free M0 cluster) — `MONGODB_URI` (see Configuration above) points at Atlas from any host, so no self-managed database server is needed.
+- **Environment variables:** set in Render's dashboard (not committed) — the same set listed in Configuration above.
+- **Razorpay webhook:** configured in the Razorpay dashboard (Test Mode) only once the Render URL is known, pointed at `https://<service>.onrender.com/payment/webhook`; the webhook secret it generates is then added to Render as `RAZORPAY_WEBHOOK_SECRET`.
+- **CORS:** `CORS_ALLOWED_ORIGINS` is updated once the frontend's real Vercel URL is known ([[frontend-spec]] Deployment), rather than left open during initial backend deploy.
+- **Cold starts:** Render's free tier spins the service down on inactivity — the first request after idle time may be noticeably slow. Acceptable for a learning demo; would need a paid tier or a keep-alive ping to avoid in a real product.
