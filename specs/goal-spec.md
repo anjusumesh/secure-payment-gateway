@@ -13,10 +13,12 @@ Build a secure payment gateway demo and use it to learn the full payment-process
 ## Scope
 A sample single-store checkout flow used to learn how a payment gateway integration works and how to secure it — not a production payment platform.
 
+**Currency:** fixed at **USD** everywhere (catalog prices, cart totals, transaction records). Not INR — PayPal has not supported receiving payments in Indian Rupees since April 2021 (their own developer docs confirm Indian users can only send/receive *international* payments in USD via PayPal, not INR), so INR is not usable with this project's chosen gateway without either misrepresenting the actual charge currency to the buyer or switching away from PayPal entirely. See [[backend-spec]] Tech Stack for the gateway choice and why.
+
 ## Out of Scope
 - Real/live payment processing (only test/sandbox gateway credentials are used).
 - Refunds, partial refunds, and chargebacks.
-- Multi-currency support.
+- Multi-currency support (single fixed currency — USD — per the Scope note above).
 - User accounts, registration, and login (unless added later as a stretch goal).
 - Multi-item inventory management (stock levels, restocking, etc.).
 - Delivery/shipping (no physical fulfillment; the Cart page shows a total to pay only — no delivery method or address step).
