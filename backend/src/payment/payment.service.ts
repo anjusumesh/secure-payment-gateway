@@ -1,6 +1,7 @@
 import {
   BadRequestException,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
@@ -48,6 +49,8 @@ function extractPaypalIssue(body: unknown): string {
 
 @Injectable()
 export class PaymentService {
+  private readonly logger = new Logger(PaymentService.name);
+
   constructor(
     private readonly paypal: PaypalClientService,
     private readonly configService: ConfigService,
@@ -227,10 +230,12 @@ export class PaymentService {
     );
 
     if (verification.verification_status !== 'SUCCESS') {
+      this.logger.warn(`Rejected webhook with invalid signature (event_type=${event.event_type})`);
       throw new BadRequestException('Invalid webhook signature');
     }
 
     const orderId = event.resource.supplementary_data?.related_ids?.order_id;
+    this.logger.log(`Verified webhook event_type=${event.event_type} orderId=${orderId ?? 'none'}`);
     if (!orderId) return;
 
     if (event.event_type === 'PAYMENT.CAPTURE.COMPLETED') {
